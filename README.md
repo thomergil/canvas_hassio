@@ -1,41 +1,90 @@
-# Canvas Custom Integration
-This is custom Home Assistant Integration for [Canvas](https://canvas.instructure.com/) from Instructure.  
+# Canvas Home Assistant Integration
 
-This integration will create several sensor entities for different objects retrieved from the [Canvas API](https://canvas.instructure.com/doc/api/) using the [Canvas Parent API](https://github.com/schwartzpub/canvas_parent_api) python module.
+Canvas custom integration for Home Assistant, based on [schwartzpub's original integration](https://github.com/schwartzpub) with enhancements including improved API compatibility and reliable data fetching.
 
-The entities that will be created are:
- - sensor.canvas_students
- - sensor.canvas_courses
- - sensor.canvas_assignments
+## Installation
 
-Currently this integration simply returns the raw output from the [Canvas API]() for these objects.  There is a basic custom card for viewing [Canvas homework assignments](https://github.com/schwartzpub/homeassistant-cards) as well.
+### 0. Prerequisites
 
-## Installing
-To install this integration, clone the repository into your Home Assistant custom_components directory:
+- Home Assistant instance
+- Canvas Parent account with API access
+- Active student enrollments linked to your parent account
+
+### 1. Get Canvas API Token
+
+1. **Log into Canvas Parent** via
+
+   ```
+   https://[your-school-district].instructure.com/profile/settings
+   ```
+
+2. **Create Token**:
+
+   - Under "Approved Integrations" → **"+ New Access Token"**
+   - Enter a **Purpose** (e.g., "Home Assistant")
+   - Set **Expiration** (or leave blank for no expiration)
+   - **Save the token** - you can't retrieve it later!
+
+### 2. Clone to Home Assistant
 
 ```bash
-[core-ssh ~]$ cd config/custom_components/
-[core-ssh ~]$ mkdir canvas
-[core-ssh ~]$ cd canvas
-[core-ssh ~]$ git clone git@github.com:schwartzpub/canvas_hassio .
+# SSH into your Home Assistant instance, then:
+cd /config/custom_components/
+git clone https://github.com/thomergil/canvas_hassio.git canvas
 ```
 
-In Home Assistant, navigate to Settings > Devices & Services and click + Add Integration
+### 3. Restart Home Assistant
 
-Select the Canvas integration.
+Restart Home Assistant to load the integration.
 
-Enter the following information:
- - Base URL (https://<yourdistrict>.instructure.com)
- - Canvas API Token 
+### 4. Configure Integration
 
- 
-### Generating Canvas API Token
-If you are a parent, you will have a Canvas Parent account.  To get an API token, you must sign into the Canvas Parent application from a web browser.  This is typically using: https://<yourdistrict>.instructure.com/login/canvas
+1. **Add Integration**:
 
-Once you have signed into your account, navigate to Account > Settings.
+   - Go to **Settings** → **Devices & Services** → **Integrations**
+   - Click **"+ Add Integration"**
+   - Search for **"Canvas"**
 
-Under "Approved Integrations" click "+ New Access Token" to create a new API Token.
+2. **Enter Configuration**:
+   - **Base URL**: `https://your-school.instructure.com`
+   - **API Token**: Your token from step 1
 
-Enter a Purpose and Expiration date (blank for no expiration).
+### 5. Verify Sensors
 
-Be sure to save your API token, as you will have to generate a new token if this is lost.
+The integration creates these sensor entities:
+
+- `sensor.canvas_students` - Your enrolled children
+- `sensor.canvas_courses` - Classes your students are taking
+- `sensor.canvas_assignments` - Homework and projects
+- `sensor.canvas_submissions` - Completed work and grades
+
+### 6. Install Canvas Cards (Optional)
+
+For enhanced homework display with smart sorting and visual indicators:
+
+```bash
+# SSH into your Home Assistant instance, then:
+cd /config/www/
+git clone https://github.com/thomergil/homeassistant-cards.git
+```
+
+See the [Canvas Cards README](https://github.com/thomergil/homeassistant-cards) for complete installation and configuration instructions.
+
+## Updating Integration
+
+When you update the integration:
+
+1. **Pull latest changes**:
+
+   ```bash
+   cd /config/custom_components/canvas/
+   git pull
+   ```
+
+2. **Restart Home Assistant** to apply changes
+
+## Related
+
+- **Main Project**: [Canvas Parent Integration](https://github.com/thomergil/canvas-parent-integration)
+- **Canvas Cards**: [homeassistant-cards](https://github.com/thomergil/homeassistant-cards) - Enhanced UI cards for displaying homework
+- **Original Integration**: Based on [schwartzpub/canvas_hassio](https://github.com/schwartzpub/canvas_hassio)
