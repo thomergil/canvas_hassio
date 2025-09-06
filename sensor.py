@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import json
+from datetime import datetime
+from typing import Dict, Set, Any
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,12 +13,17 @@ from homeassistant.components.sensor import SensorEntity, SensorEntityDescriptio
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, SCAN_INT
 
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = SCAN_INT
+
+# Storage constants
+STORAGE_VERSION = 1
+STORAGE_KEY = "canvas_homework_state"
 
 @dataclass
 class CanvasEntityDescriptionMixin:
@@ -55,20 +63,31 @@ SENSORS: tuple[CanvasEntityDescription, ...] = (
         name="Canvas Submissions",
         unique_id="canvas_submission",
         value_fn=lambda canvas: canvas.poll_submissions()
+    ),
+    CanvasEntityDescription(
+        key="homework_events",
+        name="Canvas Homework Events",
+        unique_id="canvas_homework_events",
+        value_fn=lambda canvas: canvas.poll_assignments()
     )
 )
 
 async def async_setup_entry(
-    hass: HomeAssistant, 
-    config_entry: ConfigEntry, 
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback
     ):
     """Set up the sensor platform."""
     hub = hass.data[DOMAIN][config_entry.entry_id]
-    async_add_entities(
-        [CanvasSensor(description, hub) for description in SENSORS],
-        True,
-    )
+
+    entities = []
+    for description in SENSORS:
+        if description.key == "homework_events":
+            entities.append(CanvasHomeworkEventSensor(description, hub, hass))
+        else:
+            entities.append(CanvasSensor(description, hub))
+
+    async_add_entities(entities, True)
 
 
 class CanvasSensor(SensorEntity):
@@ -84,7 +103,7 @@ class CanvasSensor(SensorEntity):
         self._attr_name = description.name
         self._attr_unique_id = f"{description.unique_id}"
         self._entity_description = description
-        self._attr_canvas_data = {}    
+        self._attr_canvas_data = {}
 
     @property
     def extra_state_attributes(self):
@@ -98,3 +117,273 @@ class CanvasSensor(SensorEntity):
         """
         self._attr_canvas_data = await self._entity_description.value_fn(self._hub)
         return
+
+
+class CanvasHomeworkEventSensor(CanvasSensor):
+    """Canvas Homework Event Sensor that fires HA events per student."""
+
+    def __init__(
+        self,
+        description: CanvasEntityDescription,
+        hub,
+        hass: HomeAssistant
+    ) -> None:
+        super().__init__(description, hub)
+        self._hass = hass
+        self._previous_assignments: Dict[str, Any] = {}
+        self._previous_submissions: Dict[str, Any] = {}
+        # Track per student: student_id -> set of assignment_ids
+        self._known_assignment_ids_per_student: Dict[str, Set[str]] = {}
+        self._completed_assignment_ids_per_student: Dict[str, Set[str]] = {}
+        self._student_info: Dict[str, Dict[str, Any]] = {}  # Cache student info
+
+        # Set up persistent storage
+        self._store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{STORAGE_KEY}")
+        self._loaded_from_storage = False
+
+    async def async_update(self) -> None:
+        """Fetch new state data and fire events for homework changes."""
+        try:
+            # Load state from storage on first update
+            if not self._loaded_from_storage:
+                await self._load_state_from_storage()
+                self._loaded_from_storage = True
+
+            # Get current data
+            current_students = await self._hub.poll_observees()
+            current_courses = await self._hub.poll_courses()
+            current_assignments = await self._hub.poll_assignments()
+            current_submissions = await self._hub.poll_submissions()
+
+            # Update student info cache
+            await self._update_student_info(current_students)
+
+            # Create assignment to student mapping
+            assignment_to_student = await self._create_assignment_student_mapping(current_courses, current_assignments)
+
+            # Group assignments and submissions by student
+            assignments_by_student = self._group_by_student(current_assignments, assignment_to_student)
+            submissions_by_student = self._group_submissions_by_student(current_submissions, assignment_to_student)
+
+            # Check for new assignments and completed homework per student
+            for student_id, assignments in assignments_by_student.items():
+                await self._check_new_assignments_for_student(student_id, assignments)
+                await self._check_completed_assignments_for_student(student_id, assignments, submissions_by_student.get(student_id, {}))
+
+            # Save state after processing
+            await self._save_state_to_storage()
+
+            # Update stored state
+            self._attr_canvas_data = current_assignments
+
+        except Exception as e:
+            _LOGGER.error(f"Error updating homework events sensor: {e}")
+
+    async def _update_student_info(self, students) -> None:
+        """Update cached student information."""
+        for student in students:
+            student_id = str(getattr(student, 'id', ''))
+            if student_id:
+                self._student_info[student_id] = {
+                    'id': student_id,
+                    'name': getattr(student, 'name', f'Student {student_id}'),
+                    'short_name': getattr(student, 'short_name', getattr(student, 'name', f'Student {student_id}')),
+                    'sortable_name': getattr(student, 'sortable_name', getattr(student, 'name', f'Student {student_id}'))
+                }
+
+    async def _create_assignment_student_mapping(self, courses, assignments) -> Dict[str, str]:
+        """Create mapping from assignment_id to student_id."""
+        assignment_to_student = {}
+
+        # Create course to student mapping first
+        course_to_student = {}
+        for course in courses:
+            course_id = str(getattr(course, 'id', ''))
+            enrollments = getattr(course, 'enrollments', [])
+            if enrollments and len(enrollments) > 0:
+                student_id = str(enrollments[0].get('user_id', ''))
+                if course_id and student_id:
+                    course_to_student[course_id] = student_id
+
+        # Map assignments to students via courses
+        for assignment in assignments:
+            assignment_id = str(getattr(assignment, 'id', ''))
+            course_id = str(getattr(assignment, 'course_id', ''))
+            if assignment_id and course_id in course_to_student:
+                assignment_to_student[assignment_id] = course_to_student[course_id]
+
+        return assignment_to_student
+
+    def _group_by_student(self, assignments, assignment_to_student) -> Dict[str, Dict[str, Any]]:
+        """Group assignments by student."""
+        assignments_by_student = {}
+        for assignment in assignments:
+            assignment_id = str(getattr(assignment, 'id', ''))
+            student_id = assignment_to_student.get(assignment_id)
+            if student_id:
+                if student_id not in assignments_by_student:
+                    assignments_by_student[student_id] = {}
+                assignments_by_student[student_id][assignment_id] = assignment
+        return assignments_by_student
+
+    def _group_submissions_by_student(self, submissions, assignment_to_student) -> Dict[str, Dict[str, Any]]:
+        """Group submissions by student."""
+        submissions_by_student = {}
+        for submission in submissions:
+            assignment_id = str(getattr(submission, 'assignment_id', ''))
+            student_id = assignment_to_student.get(assignment_id)
+            if student_id:
+                if student_id not in submissions_by_student:
+                    submissions_by_student[student_id] = {}
+                submissions_by_student[student_id][assignment_id] = submission
+        return submissions_by_student
+
+    async def _check_new_assignments_for_student(self, student_id: str, assignments: Dict[str, Any]) -> None:
+        """Check for new assignments for a specific student and fire events."""
+        if student_id not in self._known_assignment_ids_per_student:
+            self._known_assignment_ids_per_student[student_id] = set()
+
+        student_info = self._student_info.get(student_id, {})
+
+        for assignment_id, assignment in assignments.items():
+            if assignment_id not in self._known_assignment_ids_per_student[student_id] and assignment_id:
+                self._known_assignment_ids_per_student[student_id].add(assignment_id)
+
+                # Fire new homework event with student information
+                event_data = {
+                    "assignment_id": assignment_id,
+                    "assignment_name": getattr(assignment, 'name', 'Unknown Assignment'),
+                    "course_name": getattr(assignment, 'course_name', 'Unknown Course'),
+                    "due_at": getattr(assignment, 'due_at', None),
+                    "points_possible": getattr(assignment, 'points_possible', None),
+                    "html_url": getattr(assignment, 'html_url', None),
+                    "student_id": student_id,
+                    "student_name": student_info.get('name', f'Student {student_id}'),
+                    "student_short_name": student_info.get('short_name', student_info.get('name', f'Student {student_id}')),
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                # Fire generic event with student data
+                self._hass.bus.async_fire("canvas_homework_appeared", event_data)
+                _LOGGER.info(f"New homework appeared for {student_info.get('name', student_id)}: {event_data['assignment_name']} in {event_data['course_name']}")
+
+    async def _check_completed_assignments_for_student(self, student_id: str, assignments: Dict[str, Any], submissions: Dict[str, Any]) -> None:
+        """Check for completed assignments for a specific student and fire events."""
+        if student_id not in self._completed_assignment_ids_per_student:
+            self._completed_assignment_ids_per_student[student_id] = set()
+
+        student_info = self._student_info.get(student_id, {})
+
+        for assignment_id, assignment in assignments.items():
+            if assignment_id in submissions and assignment_id not in self._completed_assignment_ids_per_student[student_id]:
+                submission = submissions[assignment_id]
+
+                # Check if submission is actually submitted (not just drafted)
+                workflow_state = getattr(submission, 'workflow_state', None)
+                submitted_at = getattr(submission, 'submitted_at', None)
+
+                if workflow_state == 'submitted' and submitted_at:
+                    self._completed_assignment_ids_per_student[student_id].add(assignment_id)
+
+                    # Fire homework completed event with student information
+                    event_data = {
+                        "assignment_id": assignment_id,
+                        "assignment_name": getattr(assignment, 'name', 'Unknown Assignment'),
+                        "course_name": getattr(assignment, 'course_name', 'Unknown Course'),
+                        "submitted_at": submitted_at,
+                        "score": getattr(submission, 'score', None),
+                        "grade": getattr(submission, 'grade', None),
+                        "html_url": getattr(assignment, 'html_url', None),
+                        "student_id": student_id,
+                        "student_name": student_info.get('name', f'Student {student_id}'),
+                        "student_short_name": student_info.get('short_name', student_info.get('name', f'Student {student_id}')),
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                    # Fire generic event with student data
+                    self._hass.bus.async_fire("canvas_homework_completed", event_data)
+                    _LOGGER.info(f"Homework completed for {student_info.get('name', student_id)}: {event_data['assignment_name']} in {event_data['course_name']}")
+
+    async def _load_state_from_storage(self) -> None:
+        """Load the tracking state from persistent storage."""
+        try:
+            data = await self._store.async_load()
+            if data is not None:
+                # Convert list back to set for known assignments
+                self._known_assignment_ids_per_student = {
+                    student_id: set(assignment_ids)
+                    for student_id, assignment_ids in data.get('known_assignments', {}).items()
+                }
+                # Convert list back to set for completed assignments
+                self._completed_assignment_ids_per_student = {
+                    student_id: set(assignment_ids)
+                    for student_id, assignment_ids in data.get('completed_assignments', {}).items()
+                }
+                # Load student info
+                self._student_info = data.get('student_info', {})
+
+                _LOGGER.info(f"Loaded homework state from storage: {len(self._known_assignment_ids_per_student)} students tracked")
+            else:
+                _LOGGER.info("No previous homework state found, starting fresh")
+        except Exception as e:
+            _LOGGER.warning(f"Failed to load homework state from storage: {e}")
+            # Initialize empty state on load failure
+            self._known_assignment_ids_per_student = {}
+            self._completed_assignment_ids_per_student = {}
+            self._student_info = {}
+
+    async def _save_state_to_storage(self) -> None:
+        """Save the tracking state to persistent storage."""
+        try:
+            # Convert sets to lists for JSON serialization
+            data = {
+                'known_assignments': {
+                    student_id: list(assignment_ids)
+                    for student_id, assignment_ids in self._known_assignment_ids_per_student.items()
+                },
+                'completed_assignments': {
+                    student_id: list(assignment_ids)
+                    for student_id, assignment_ids in self._completed_assignment_ids_per_student.items()
+                },
+                'student_info': self._student_info,
+                'last_saved': datetime.now().isoformat()
+            }
+            await self._store.async_save(data)
+        except Exception as e:
+            _LOGGER.error(f"Failed to save homework state to storage: {e}")
+
+    @property
+    def state(self) -> str:
+        """Return the state of the sensor."""
+        return len(self._attr_canvas_data) if self._attr_canvas_data else 0
+
+    @property
+    def extra_state_attributes(self):
+        """Add extra attributes including per-student event counts."""
+        base_attrs = super().extra_state_attributes
+
+        # Calculate totals
+        total_known = sum(len(assignments) for assignments in self._known_assignment_ids_per_student.values())
+        total_completed = sum(len(assignments) for assignments in self._completed_assignment_ids_per_student.values())
+
+        # Per-student breakdown
+        students_info = {}
+        for student_id, student_info in self._student_info.items():
+            known_count = len(self._known_assignment_ids_per_student.get(student_id, set()))
+            completed_count = len(self._completed_assignment_ids_per_student.get(student_id, set()))
+            students_info[student_id] = {
+                "name": student_info.get('name', f'Student {student_id}'),
+                "known_assignments": known_count,
+                "completed_assignments": completed_count,
+                "pending_assignments": known_count - completed_count
+            }
+
+        base_attrs.update({
+            "total_known_assignments": total_known,
+            "total_completed_assignments": total_completed,
+            "total_pending_assignments": total_known - total_completed,
+            "students": students_info,
+            "student_count": len(self._student_info),
+            "last_update": datetime.now().isoformat()
+        })
+        return base_attrs
