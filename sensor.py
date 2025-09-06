@@ -107,8 +107,38 @@ class CanvasSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Add extra attribute."""
-        return {f"{self._entity_description.key}": [x.as_dict() for x in self._attr_canvas_data]}
+        """Add extra attribute with size limits to prevent database issues."""
+        if not self._attr_canvas_data:
+            return {f"{self._entity_description.key}_count": 0}
+        
+        # Limit data size to prevent 16KB database limit issues
+        data_list = []
+        total_size = 0
+        max_size = 12000  # Leave some room under 16KB limit
+        
+        for item in self._attr_canvas_data:
+            if item is None:
+                continue
+                
+            try:
+                item_dict = item.as_dict() if hasattr(item, 'as_dict') else str(item)
+                item_size = len(str(item_dict))
+                
+                if total_size + item_size > max_size:
+                    break
+                    
+                data_list.append(item_dict)
+                total_size += item_size
+                
+            except Exception as e:
+                _LOGGER.debug(f"Error serializing item: {e}")
+                continue
+        
+        return {
+            f"{self._entity_description.key}": data_list,
+            f"{self._entity_description.key}_count": len(self._attr_canvas_data),
+            f"{self._entity_description.key}_truncated": len(data_list) < len(self._attr_canvas_data)
+        }
 
     async def async_update(self) -> None:
         """Fetch new state data for the sensor.
@@ -149,11 +179,25 @@ class CanvasHomeworkEventSensor(CanvasSensor):
                 await self._load_state_from_storage()
                 self._loaded_from_storage = True
 
-            # Get current data
-            current_students = await self._hub.poll_observees()
-            current_courses = await self._hub.poll_courses()
-            current_assignments = await self._hub.poll_assignments()
-            current_submissions = await self._hub.poll_submissions()
+            # Get current data with validation
+            current_students = await self._hub.poll_observees() or []
+            current_courses = await self._hub.poll_courses() or []
+            current_assignments = await self._hub.poll_assignments() or []
+            current_submissions = await self._hub.poll_submissions() or []
+            
+            # Validate API responses
+            if not isinstance(current_students, list):
+                _LOGGER.warning(f"Invalid students data type: {type(current_students)}")
+                current_students = []
+            if not isinstance(current_courses, list):
+                _LOGGER.warning(f"Invalid courses data type: {type(current_courses)}")
+                current_courses = []
+            if not isinstance(current_assignments, list):
+                _LOGGER.warning(f"Invalid assignments data type: {type(current_assignments)}")
+                current_assignments = []
+            if not isinstance(current_submissions, list):
+                _LOGGER.warning(f"Invalid submissions data type: {type(current_submissions)}")
+                current_submissions = []
 
             # Update student info cache
             await self._update_student_info(current_students)
@@ -198,10 +242,20 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         # Create course to student mapping first
         course_to_student = {}
         for course in courses:
+            if course is None:
+                continue
+                
             course_id = str(getattr(course, 'id', ''))
             enrollments = getattr(course, 'enrollments', [])
-            if enrollments and len(enrollments) > 0:
-                student_id = str(enrollments[0].get('user_id', ''))
+            
+            if enrollments and len(enrollments) > 0 and enrollments[0] is not None:
+                # Safely handle enrollment data
+                enrollment = enrollments[0]
+                if isinstance(enrollment, dict):
+                    student_id = str(enrollment.get('user_id', ''))
+                else:
+                    student_id = str(getattr(enrollment, 'user_id', ''))
+                
                 if course_id and student_id:
                     course_to_student[course_id] = student_id
 
@@ -218,9 +272,12 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         """Group assignments by student."""
         assignments_by_student = {}
         for assignment in assignments:
+            if assignment is None:
+                continue
+                
             assignment_id = str(getattr(assignment, 'id', ''))
             student_id = assignment_to_student.get(assignment_id)
-            if student_id:
+            if student_id and assignment_id:
                 if student_id not in assignments_by_student:
                     assignments_by_student[student_id] = {}
                 assignments_by_student[student_id][assignment_id] = assignment
