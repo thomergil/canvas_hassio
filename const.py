@@ -13,7 +13,9 @@ SCAN_INT = timedelta(minutes=10)
 CONF_BASEURI = "baseuri"
 CONF_SECRET = "token"
 CONF_SEMAPHORE = "semaphore"
+CONF_DISABLE_PERSISTENCE = "disable_persistence"
 DEFAULT_SEMAPHORE = 15
+DEFAULT_DISABLE_PERSISTENCE = False
 
 STUDENTS = "Student(s)"
 COURSES = "Course(s)"

@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, SCAN_INT
+from .const import DOMAIN, SCAN_INT, CONF_DISABLE_PERSISTENCE, DEFAULT_DISABLE_PERSISTENCE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def async_setup_entry(
     entities = []
     for description in SENSORS:
         if description.key == "homework_events":
-            entities.append(CanvasHomeworkEventSensor(description, hub, hass))
+            entities.append(CanvasHomeworkEventSensor(description, hub, hass, config_entry))
         else:
             entities.append(CanvasSensor(description, hub))
 
@@ -110,30 +110,30 @@ class CanvasSensor(SensorEntity):
         """Add extra attribute with size limits to prevent database issues."""
         if not self._attr_canvas_data:
             return {f"{self._entity_description.key}_count": 0}
-        
+
         # Limit data size to prevent 16KB database limit issues
         data_list = []
         total_size = 0
         max_size = 12000  # Leave some room under 16KB limit
-        
+
         for item in self._attr_canvas_data:
             if item is None:
                 continue
-                
+
             try:
                 item_dict = item.as_dict() if hasattr(item, 'as_dict') else str(item)
                 item_size = len(str(item_dict))
-                
+
                 if total_size + item_size > max_size:
                     break
-                    
+
                 data_list.append(item_dict)
                 total_size += item_size
-                
+
             except Exception as e:
                 _LOGGER.debug(f"Error serializing item: {e}")
                 continue
-        
+
         return {
             f"{self._entity_description.key}": data_list,
             f"{self._entity_description.key}_count": len(self._attr_canvas_data),
@@ -156,10 +156,12 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         self,
         description: CanvasEntityDescription,
         hub,
-        hass: HomeAssistant
+        hass: HomeAssistant,
+        config_entry: ConfigEntry
     ) -> None:
         super().__init__(description, hub)
         self._hass = hass
+        self._config_entry = config_entry
         self._previous_assignments: Dict[str, Any] = {}
         self._previous_submissions: Dict[str, Any] = {}
         # Track per student: student_id -> set of assignment_ids
@@ -167,24 +169,34 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         self._completed_assignment_ids_per_student: Dict[str, Set[str]] = {}
         self._student_info: Dict[str, Dict[str, Any]] = {}  # Cache student info
 
-        # Set up persistent storage
-        self._store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{STORAGE_KEY}")
+        # Check if persistence is disabled
+        self._persistence_disabled = config_entry.options.get(CONF_DISABLE_PERSISTENCE, DEFAULT_DISABLE_PERSISTENCE)
+
+        # Set up persistent storage (only if not disabled)
+        if not self._persistence_disabled:
+            self._store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{STORAGE_KEY}")
+        else:
+            self._store = None
+            _LOGGER.info("Homework events persistence is disabled - working with raw Canvas data only")
+
         self._loaded_from_storage = False
 
     async def async_update(self) -> None:
         """Fetch new state data and fire events for homework changes."""
         try:
-            # Load state from storage on first update
-            if not self._loaded_from_storage:
+            # Load state from storage on first update (only if persistence enabled)
+            if not self._loaded_from_storage and not self._persistence_disabled:
                 await self._load_state_from_storage()
                 self._loaded_from_storage = True
+            elif self._persistence_disabled:
+                self._loaded_from_storage = True  # Skip storage loading
 
             # Get current data with validation
             current_students = await self._hub.poll_observees() or []
             current_courses = await self._hub.poll_courses() or []
             current_assignments = await self._hub.poll_assignments() or []
             current_submissions = await self._hub.poll_submissions() or []
-            
+
             # Validate API responses
             if not isinstance(current_students, list):
                 _LOGGER.warning(f"Invalid students data type: {type(current_students)}")
@@ -213,21 +225,21 @@ class CanvasHomeworkEventSensor(CanvasSensor):
             for student_id, assignments in assignments_by_student.items():
                 await self._check_new_assignments_for_student(student_id, assignments)
                 await self._check_completed_assignments_for_student(student_id, assignments, submissions_by_student.get(student_id, {}))
-            
-            # Clean up stale assignments no longer returned by Canvas
-            await self._cleanup_stale_assignments(assignments_by_student)
-            
-            # Save state after processing
-            await self._save_state_to_storage()
+
+            # Clean up stale assignments no longer returned by Canvas (only if persistence enabled)
+            if not self._persistence_disabled:
+                await self._cleanup_stale_assignments(assignments_by_student)
+                # Save state after processing
+                await self._save_state_to_storage()
 
             # Update stored state
             self._attr_canvas_data = current_assignments
-            
+
             # Log diagnostic info
             total_assignments = len(current_assignments)
             total_known = sum(len(ids) for ids in self._known_assignment_ids_per_student.values())
             _LOGGER.debug(f"Canvas API returned {total_assignments} assignments, tracking {total_known} known assignments across {len(self._known_assignment_ids_per_student)} students")
-            
+
         except Exception as e:
             _LOGGER.error(f"Error updating homework events sensor: {e}")
 
@@ -252,10 +264,10 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         for course in courses:
             if course is None:
                 continue
-                
+
             course_id = str(getattr(course, 'id', ''))
             enrollments = getattr(course, 'enrollments', [])
-            
+
             if enrollments and len(enrollments) > 0 and enrollments[0] is not None:
                 # Safely handle enrollment data
                 enrollment = enrollments[0]
@@ -263,7 +275,7 @@ class CanvasHomeworkEventSensor(CanvasSensor):
                     student_id = str(enrollment.get('user_id', ''))
                 else:
                     student_id = str(getattr(enrollment, 'user_id', ''))
-                
+
                 if course_id and student_id:
                     course_to_student[course_id] = student_id
 
@@ -282,7 +294,7 @@ class CanvasHomeworkEventSensor(CanvasSensor):
         for assignment in assignments:
             if assignment is None:
                 continue
-                
+
             assignment_id = str(getattr(assignment, 'id', ''))
             student_id = assignment_to_student.get(assignment_id)
             if student_id and assignment_id:
@@ -372,35 +384,38 @@ class CanvasHomeworkEventSensor(CanvasSensor):
     async def _cleanup_stale_assignments(self, current_assignments_by_student: Dict[str, Dict[str, Any]]) -> None:
         """Remove assignments from tracking that are no longer returned by Canvas API."""
         removed_count = 0
-        
+
         # Clean up known assignments
         for student_id in list(self._known_assignment_ids_per_student.keys()):
             current_assignment_ids = set(current_assignments_by_student.get(student_id, {}).keys())
             known_assignment_ids = self._known_assignment_ids_per_student[student_id].copy()
-            
+
             # Remove assignments that are no longer in current data
             stale_assignments = known_assignment_ids - current_assignment_ids
             if stale_assignments:
                 self._known_assignment_ids_per_student[student_id] -= stale_assignments
                 removed_count += len(stale_assignments)
                 _LOGGER.debug(f"Removed {len(stale_assignments)} stale assignments for student {student_id}")
-        
+
         # Clean up completed assignments
         for student_id in list(self._completed_assignment_ids_per_student.keys()):
             current_assignment_ids = set(current_assignments_by_student.get(student_id, {}).keys())
             completed_assignment_ids = self._completed_assignment_ids_per_student[student_id].copy()
-            
+
             # Remove completed assignments that are no longer in current data
             stale_completed = completed_assignment_ids - current_assignment_ids
             if stale_completed:
                 self._completed_assignment_ids_per_student[student_id] -= stale_completed
                 _LOGGER.debug(f"Removed {len(stale_completed)} stale completed assignments for student {student_id}")
-        
+
         if removed_count > 0:
             _LOGGER.info(f"Cleaned up {removed_count} stale assignments no longer returned by Canvas API")
 
     async def _load_state_from_storage(self) -> None:
         """Load the tracking state from persistent storage."""
+        if self._store is None:
+            return
+
         try:
             data = await self._store.async_load()
             if data is not None:
@@ -429,6 +444,9 @@ class CanvasHomeworkEventSensor(CanvasSensor):
 
     async def _save_state_to_storage(self) -> None:
         """Save the tracking state to persistent storage."""
+        if self._store is None:
+            return
+
         try:
             # Convert sets to lists for JSON serialization
             data = {
@@ -479,6 +497,7 @@ class CanvasHomeworkEventSensor(CanvasSensor):
             "total_pending_assignments": total_known - total_completed,
             "students": students_info,
             "student_count": len(self._student_info),
+            "persistence_disabled": self._persistence_disabled,
             "last_update": datetime.now().isoformat()
         })
         return base_attrs

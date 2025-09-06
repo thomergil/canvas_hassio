@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONF_BASEURI, CONF_SECRET, DEFAULT_SEMAPHORE, DOMAIN, NAME, VERSION, CONF_SEMAPHORE
+from .const import CONF_BASEURI, CONF_SECRET, DEFAULT_SEMAPHORE, DOMAIN, NAME, VERSION, CONF_SEMAPHORE, CONF_DISABLE_PERSISTENCE, DEFAULT_DISABLE_PERSISTENCE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,7 +89,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         description = {
                             CONF_SEMAPHORE: "The Semaphore is the number of concurrent requests to send to the Canvas API. Since Canvas rate-limits requests, it is recommended to keep this number low (max 15) to prevent rate limiting."
                         }
-                    ): int 
+                    ): int,
+                    vol.Optional(
+                        CONF_DISABLE_PERSISTENCE,
+                        default = self.config_entry.options.get(CONF_DISABLE_PERSISTENCE, DEFAULT_DISABLE_PERSISTENCE),
+                        description = {
+                            CONF_DISABLE_PERSISTENCE: "Disable persistent storage for homework events. When enabled, the integration will work with raw Canvas data only and won't remember previously seen assignments across restarts. Useful for debugging or if you prefer not to use caching."
+                        }
+                    ): bool
                 }
             ),
         )
