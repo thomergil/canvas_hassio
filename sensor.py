@@ -238,7 +238,13 @@ class CanvasHomeworkEventSensor(CanvasSensor):
             # Log diagnostic info
             total_assignments = len(current_assignments)
             total_known = sum(len(ids) for ids in self._known_assignment_ids_per_student.values())
-            _LOGGER.debug(f"Canvas API returned {total_assignments} assignments, tracking {total_known} known assignments across {len(self._known_assignment_ids_per_student)} students")
+            total_by_student = sum(len(assignments) for assignments in assignments_by_student.values())
+            _LOGGER.info(f"Canvas API returned {total_assignments} assignments, mapped {total_by_student} to students, tracking {total_known} known assignments across {len(self._known_assignment_ids_per_student)} students")
+
+            # Log per-student assignment counts
+            for student_id, assignments in assignments_by_student.items():
+                student_name = self._student_info.get(student_id, {}).get('name', student_id)
+                _LOGGER.info(f"Student {student_name} ({student_id}): {len(assignments)} assignments mapped")
 
         except Exception as e:
             _LOGGER.error(f"Error updating homework events sensor: {e}")
@@ -280,12 +286,24 @@ class CanvasHomeworkEventSensor(CanvasSensor):
                     course_to_student[course_id] = student_id
 
         # Map assignments to students via courses
+        mapped_count = 0
+        unmapped_count = 0
         for assignment in assignments:
+            if assignment is None:
+                continue
+
             assignment_id = str(getattr(assignment, 'id', ''))
             course_id = str(getattr(assignment, 'course_id', ''))
+            assignment_name = getattr(assignment, 'name', 'Unknown')
+
             if assignment_id and course_id in course_to_student:
                 assignment_to_student[assignment_id] = course_to_student[course_id]
+                mapped_count += 1
+            else:
+                unmapped_count += 1
+                _LOGGER.warning(f"Could not map assignment '{assignment_name}' (ID: {assignment_id}, Course: {course_id}) to student")
 
+        _LOGGER.info(f"Assignment mapping: {mapped_count} mapped, {unmapped_count} unmapped")
         return assignment_to_student
 
     def _group_by_student(self, assignments, assignment_to_student) -> Dict[str, Dict[str, Any]]:
