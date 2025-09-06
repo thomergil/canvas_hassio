@@ -108,7 +108,7 @@ class CanvasSensor(SensorEntity):
         # Initialize storage for full dataset (bypasses 16KB database limit)
         from homeassistant.helpers.storage import Store
         self._data_store = Store(
-            self._hub._hass,
+            self._hub.hass,
             1,  # Version
             f"canvas_hassio_{description.key}_data",
             encoder=lambda obj: obj if isinstance(obj, (dict, list, str, int, float, bool, type(None))) else str(obj)

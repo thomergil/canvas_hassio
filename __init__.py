@@ -33,8 +33,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
 
         # Find the sensor entity
-        entity_registry = hass.helpers.entity_registry.async_get(hass)
-        entity_entry = entity_registry.async_get(entity_id)
+        from homeassistant.helpers import entity_registry
+        registry = entity_registry.async_get(hass)
+        entity_entry = registry.async_get(entity_id)
 
         if not entity_entry:
             _LOGGER.error(f"Entity {entity_id} not found")
