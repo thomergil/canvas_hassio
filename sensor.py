@@ -213,13 +213,21 @@ class CanvasHomeworkEventSensor(CanvasSensor):
             for student_id, assignments in assignments_by_student.items():
                 await self._check_new_assignments_for_student(student_id, assignments)
                 await self._check_completed_assignments_for_student(student_id, assignments, submissions_by_student.get(student_id, {}))
-
+            
+            # Clean up stale assignments no longer returned by Canvas
+            await self._cleanup_stale_assignments(assignments_by_student)
+            
             # Save state after processing
             await self._save_state_to_storage()
 
             # Update stored state
             self._attr_canvas_data = current_assignments
-
+            
+            # Log diagnostic info
+            total_assignments = len(current_assignments)
+            total_known = sum(len(ids) for ids in self._known_assignment_ids_per_student.values())
+            _LOGGER.debug(f"Canvas API returned {total_assignments} assignments, tracking {total_known} known assignments across {len(self._known_assignment_ids_per_student)} students")
+            
         except Exception as e:
             _LOGGER.error(f"Error updating homework events sensor: {e}")
 
@@ -360,6 +368,36 @@ class CanvasHomeworkEventSensor(CanvasSensor):
                     # Fire generic event with student data
                     self._hass.bus.async_fire("canvas_homework_completed", event_data)
                     _LOGGER.info(f"Homework completed for {student_info.get('name', student_id)}: {event_data['assignment_name']} in {event_data['course_name']}")
+
+    async def _cleanup_stale_assignments(self, current_assignments_by_student: Dict[str, Dict[str, Any]]) -> None:
+        """Remove assignments from tracking that are no longer returned by Canvas API."""
+        removed_count = 0
+        
+        # Clean up known assignments
+        for student_id in list(self._known_assignment_ids_per_student.keys()):
+            current_assignment_ids = set(current_assignments_by_student.get(student_id, {}).keys())
+            known_assignment_ids = self._known_assignment_ids_per_student[student_id].copy()
+            
+            # Remove assignments that are no longer in current data
+            stale_assignments = known_assignment_ids - current_assignment_ids
+            if stale_assignments:
+                self._known_assignment_ids_per_student[student_id] -= stale_assignments
+                removed_count += len(stale_assignments)
+                _LOGGER.debug(f"Removed {len(stale_assignments)} stale assignments for student {student_id}")
+        
+        # Clean up completed assignments
+        for student_id in list(self._completed_assignment_ids_per_student.keys()):
+            current_assignment_ids = set(current_assignments_by_student.get(student_id, {}).keys())
+            completed_assignment_ids = self._completed_assignment_ids_per_student[student_id].copy()
+            
+            # Remove completed assignments that are no longer in current data
+            stale_completed = completed_assignment_ids - current_assignment_ids
+            if stale_completed:
+                self._completed_assignment_ids_per_student[student_id] -= stale_completed
+                _LOGGER.debug(f"Removed {len(stale_completed)} stale completed assignments for student {student_id}")
+        
+        if removed_count > 0:
+            _LOGGER.info(f"Cleaned up {removed_count} stale assignments no longer returned by Canvas API")
 
     async def _load_state_from_storage(self) -> None:
         """Load the tracking state from persistent storage."""
