@@ -1,6 +1,6 @@
 # Canvas Home Assistant Integration
 
-Canvas custom integration for Home Assistant, based on [schwartzpub's original integration](https://github.com/schwartzpub) with enhancements including improved API compatibility, reliable data fetching, and **homework event automation support**.
+Canvas custom integration for Home Assistant, based on [schwartzpub's original integration](https://github.com/schwartzpub) with enhancements including improved API compatibility, reliable data fetching, and homework event automation support.
 
 ## Installation
 
@@ -84,9 +84,7 @@ When you update the integration:
 
 2. **Restart Home Assistant** to apply changes
 
-## 🎯 Homework Event Automations
-
-This integration fires Home Assistant events when homework appears or gets completed, with full per-student tracking allowing you to create powerful automations around each individual student's homework activities.
+## Homework Event Automations
 
 ### Events Fired
 
@@ -149,7 +147,7 @@ students:
     pending_assignments: 2
 ```
 
-## 🚀 Setting Up Homework Automations
+## Setting Up Homework Automations
 
 ### Generic Notification (All Students)
 ```yaml
@@ -246,74 +244,7 @@ Check the sensor attributes at `sensor.canvas_homework_events` to see all studen
         message: "{{ trigger.event.data.student_name }} (ID: {{ trigger.event.data.student_id }})"
 ```
 
-## 💡 Advanced Automation Ideas
-
-1. **Individual Study Time Management**: Set different smart home configurations per student
-2. **Targeted Parental Notifications**: Route notifications to specific parent devices based on student
-3. **Per-Student Reward Systems**: Different reward mechanisms for each child
-4. **Individual Room Control**: Control each student's room lighting, music, etc.
-5. **Student-Specific Calendars**: Create separate calendar events for each student
-6. **Progress Tracking**: Track homework completion streaks and patterns per student
-7. **Customized Celebrations**: Different celebration modes for different students
-8. **Bedtime Adjustments**: Extend bedtime for specific students when homework is completed
-
-### Example: Per-Student Room Lighting
-```yaml
-- alias: "Canvas - Student Study Lighting"
-  description: "Control individual student room lighting based on homework"
-  trigger:
-    - platform: event
-      event_type: canvas_homework_appeared
-  action:
-    - choose:
-        # Alice's homework - turn on her room light
-        - conditions:
-            - condition: template
-              value_template: "{{ trigger.event.data.student_name == 'Alice Smith' }}"
-          sequence:
-            - service: light.turn_on
-              target:
-                entity_id: light.alice_room
-              data:
-                brightness: 200
-                color_temp: 250
-        # Bob's homework - turn on his room light  
-        - conditions:
-            - condition: template
-              value_template: "{{ trigger.event.data.student_name == 'Bob Smith' }}"
-          sequence:
-            - service: light.turn_on
-              target:
-                entity_id: light.bob_room
-              data:
-                brightness: 200
-                color_temp: 250
-```
-
-### Example: Homework Completion Celebration
-```yaml
-- alias: "Canvas - Homework Completed Celebration"
-  description: "Celebrate when homework is submitted"
-  trigger:
-    - platform: event
-      event_type: canvas_homework_completed
-  condition:
-    - condition: time
-      after: "16:00:00"
-      before: "20:00:00"
-  action:
-    - service: media_player.play_media
-      target:
-        entity_id: media_player.living_room
-      data:
-        media_content_id: "https://www.soundjay.com/misc/sounds/tada.wav"
-        media_content_type: "music"
-    - delay: "00:00:05"
-    - service: tts.speak
-      data:
-        entity_id: media_player.living_room
-        message: "Congratulations {{ trigger.event.data.student_name }} on completing your {{ trigger.event.data.assignment_name }} assignment!"
-```
+## Advanced Automation Ideas
 
 ### Example: Homework Due Soon Reminder
 ```yaml
@@ -335,28 +266,37 @@ Check the sensor attributes at `sensor.canvas_homework_events` to see all studen
       data:
         title: "⚠️ Homework Due Soon!"
         message: >
-          {{ trigger.event.data.assignment_name }} 
+          {{ trigger.event.data.assignment_name }}
           for {{ trigger.event.data.student_name }}
-          in {{ trigger.event.data.course_name }} 
+          in {{ trigger.event.data.course_name }}
           is due within 24 hours!
 ```
 
-## 🎨 Using the Home Assistant UI
+## Using the Home Assistant UI
 
-These events work perfectly with the Home Assistant UI automation builder:
+**These events are designed to work seamlessly with Home Assistant's visual automation builder!**
 
-1. **Choose "Event" as your trigger type**
-2. **Enter the event type**: `canvas_homework_appeared` or `canvas_homework_completed`
-3. **Add conditions** using the visual template editor:
-   - Template: `{{ trigger.event.data.student_name == 'Alice Smith' }}`
-4. **Access event data** in actions using templates like:
-   - `{{ trigger.event.data.student_name }}`
-   - `{{ trigger.event.data.assignment_name }}`
-   - `{{ trigger.event.data.course_name }}`
+### Quick Start Guide:
+1. **Go to**: Settings → Automations & Scenes → Create Automation
+2. **Trigger**: Choose "Event"
+3. **Event Type**: Enter `canvas_homework_appeared` or `canvas_homework_completed`
+4. **Condition** (optional): Add template condition for specific students:
+   ```yaml
+   {{ trigger.event.data.student_name == 'Alice Smith' }}
+   ```
+5. **Actions**: Use any Home Assistant action (notifications, lights, TTS, etc.)
 
-The UI automation builder makes it easy to create and manage homework automations without manually editing YAML files!
+### Available Event Data:
+Use these in your action templates:
+- `{{ trigger.event.data.student_name }}` - Full student name
+- `{{ trigger.event.data.assignment_name }}` - Assignment title
+- `{{ trigger.event.data.course_name }}` - Class name
+- `{{ trigger.event.data.due_at }}` - Due date (homework_appeared only)
+- `{{ trigger.event.data.score }}` - Grade received (homework_completed only)
 
-## 💾 State Persistence
+**No YAML editing required** - the visual automation builder handles everything!
+
+## State Persistence
 
 The integration uses **persistent storage** to remember which assignments it has seen before:
 
