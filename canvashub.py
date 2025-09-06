@@ -83,6 +83,34 @@ class CanvasHub(DataUpdateCoordinator):
         )
         return assignments
 
+    async def poll_pending_assignments(self) -> list[dict]:
+        """Get only pending (unsubmitted/ungraded) Canvas Assignments."""
+        # Get all assignments and submissions
+        assignments = await self.poll_assignments()
+        submissions = await self.poll_submissions()
+
+        # Create lookup of submitted assignment IDs
+        submitted_assignment_ids = set()
+        for submission in submissions:
+            if hasattr(submission, 'workflow_state') and hasattr(submission, 'assignment_id'):
+                workflow_state = getattr(submission, 'workflow_state', None)
+                submitted_at = getattr(submission, 'submitted_at', None)
+
+                # Consider assignment submitted if it has been submitted (not just drafted)
+                if workflow_state == 'submitted' and submitted_at:
+                    assignment_id = str(getattr(submission, 'assignment_id', ''))
+                    if assignment_id:
+                        submitted_assignment_ids.add(assignment_id)
+
+        # Filter out submitted assignments
+        pending_assignments = []
+        for assignment in assignments:
+            assignment_id = str(getattr(assignment, 'id', ''))
+            if assignment_id and assignment_id not in submitted_assignment_ids:
+                pending_assignments.append(assignment)
+
+        return pending_assignments
+
     async def poll_submissions(self) -> list[dict]:
         """Get Canvas Assignments."""
         submissions: list[Submission] = []

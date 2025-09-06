@@ -56,7 +56,7 @@ SENSORS: tuple[CanvasEntityDescription, ...] = (
         key="assignment",
         name="Canvas Assignments",
         unique_id="canvas_assignment",
-        value_fn=lambda canvas: canvas.poll_assignments()
+        value_fn=lambda canvas: canvas.poll_pending_assignments()
     ),
     CanvasEntityDescription(
         key="submission",
@@ -68,7 +68,7 @@ SENSORS: tuple[CanvasEntityDescription, ...] = (
         key="homework_events",
         name="Canvas Homework Events",
         unique_id="canvas_homework_events",
-        value_fn=lambda canvas: canvas.poll_assignments()
+        value_fn=lambda canvas: canvas.poll_pending_assignments()
     )
 )
 
@@ -105,28 +105,31 @@ class CanvasSensor(SensorEntity):
         self._entity_description = description
         self._attr_canvas_data = {}
 
-        # Initialize storage for full dataset (bypasses 16KB database limit)
-        from homeassistant.helpers.storage import Store
-        self._data_store = Store(
-            self._hub.hass,
-            1,  # Version
-            f"canvas_hassio_{description.key}_data",
-            encoder=lambda obj: obj if isinstance(obj, (dict, list, str, int, float, bool, type(None))) else str(obj)
-        )
+        # No complex storage needed for base sensors
 
     @property
     def extra_state_attributes(self):
-        """Add essential attributes only - full data stored in HA storage."""
+        """Add all data - cards need to see everything."""
         if not self._attr_canvas_data:
             return {f"{self._entity_description.key}_count": 0}
 
-        # Store only summary info in database to stay under 16KB limit
-        # Full data is available via Home Assistant storage for cards to access
+        # Convert all data for UI cards - no limits
+        data_list = []
+
+        for item in self._attr_canvas_data:
+            if item is None:
+                continue
+
+            try:
+                item_dict = item.as_dict() if hasattr(item, 'as_dict') else str(item)
+                data_list.append(item_dict)
+            except Exception as e:
+                _LOGGER.debug(f"Error serializing item: {e}")
+                continue
+
         return {
-            f"{self._entity_description.key}_count": len(self._attr_canvas_data),
-            f"{self._entity_description.key}_storage_key": f"canvas_hassio_{self._entity_description.key}",
-            "last_updated": datetime.now().isoformat(),
-            "storage_available": True
+            f"{self._entity_description.key}": data_list,
+            f"{self._entity_description.key}_count": len(self._attr_canvas_data)
         }
 
     async def async_update(self) -> None:
@@ -135,57 +138,7 @@ class CanvasSensor(SensorEntity):
         This is the only method that should fetch new data for Home Assistant.
         """
         self._attr_canvas_data = await self._entity_description.value_fn(self._hub)
-
-        # Save full data to HA storage (bypasses 16KB database limit)
-        await self._save_full_data_to_storage()
         return
-
-    async def _save_full_data_to_storage(self) -> None:
-        """Save complete dataset to Home Assistant storage."""
-        if not self._attr_canvas_data:
-            return
-
-        try:
-            # Convert data to serializable format
-            storage_data = []
-            for item in self._attr_canvas_data:
-                if item is None:
-                    continue
-
-                try:
-                    if hasattr(item, 'as_dict'):
-                        storage_data.append(item.as_dict())
-                    else:
-                        storage_data.append(str(item))
-                except Exception as e:
-                    _LOGGER.debug(f"Error serializing item for storage: {e}")
-                    continue
-
-            # Save to storage
-            await self._data_store.async_save({
-                "data": storage_data,
-                "count": len(storage_data),
-                "last_updated": datetime.now().isoformat(),
-                "sensor_type": self._entity_description.key
-            })
-
-            _LOGGER.debug(f"Saved {len(storage_data)} {self._entity_description.key} items to storage")
-
-        except Exception as e:
-            _LOGGER.error(f"Failed to save {self._entity_description.key} data to storage: {e}")
-
-    async def async_get_full_data(self) -> Dict[str, Any]:
-        """Retrieve complete dataset from Home Assistant storage for cards to use."""
-        try:
-            stored_data = await self._data_store.async_load()
-            if stored_data:
-                return stored_data
-            else:
-                _LOGGER.debug(f"No stored data found for {self._entity_description.key}")
-                return {"data": [], "count": 0}
-        except Exception as e:
-            _LOGGER.error(f"Failed to load {self._entity_description.key} data from storage: {e}")
-            return {"data": [], "count": 0}
 
 
 class CanvasHomeworkEventSensor(CanvasSensor):
@@ -233,7 +186,7 @@ class CanvasHomeworkEventSensor(CanvasSensor):
             # Get current data with validation
             current_students = await self._hub.poll_observees() or []
             current_courses = await self._hub.poll_courses() or []
-            current_assignments = await self._hub.poll_assignments() or []
+            current_assignments = await self._hub.poll_pending_assignments() or []
             current_submissions = await self._hub.poll_submissions() or []
 
             # Validate API responses

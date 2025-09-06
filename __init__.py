@@ -24,35 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = CanvasHub(hass)
     await hass.config_entries.async_forward_entry_setups(entry, HA_SENSOR)
 
-    # Register service to get full data from storage
-    async def get_full_canvas_data(call):
-        """Service to retrieve full Canvas data from storage for cards."""
-        entity_id = call.data.get("entity_id")
-        if not entity_id:
-            _LOGGER.error("No entity_id provided for get_full_canvas_data service")
-            return
-
-        # Find the sensor entity
-        from homeassistant.helpers import entity_registry
-        registry = entity_registry.async_get(hass)
-        entity_entry = registry.async_get(entity_id)
-
-        if not entity_entry:
-            _LOGGER.error(f"Entity {entity_id} not found")
-            return
-
-        # Get the sensor from the state machine
-        state = hass.states.get(entity_id)
-        if not state:
-            _LOGGER.error(f"State for {entity_id} not found")
-            return
-
-        # Try to get the actual sensor object to call async_get_full_data
-        # This would need to be implemented based on how the entities are stored
-        _LOGGER.info(f"Full data service called for {entity_id}")
-        return {"status": "service_registered"}
-
-    hass.services.async_register(DOMAIN, "get_full_data", get_full_canvas_data)
+    # Canvas integration setup complete
 
     return True
 
