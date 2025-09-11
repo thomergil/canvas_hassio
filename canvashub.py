@@ -96,8 +96,16 @@ class CanvasHub(DataUpdateCoordinator):
                 workflow_state = getattr(submission, 'workflow_state', None)
                 submitted_at = getattr(submission, 'submitted_at', None)
 
-                # Consider assignment submitted if it has been submitted (not just drafted) or graded
-                if workflow_state in ['submitted', 'graded'] and submitted_at:
+                # Consider assignment completed if it has been submitted or has a grade/score
+                grade = getattr(submission, 'grade', None)
+                score = getattr(submission, 'score', None)
+
+                # Assignment is completed if:
+                # 1. It has been submitted (not just drafted), OR
+                # 2. It has been graded (has a grade or score)
+                if ((workflow_state == 'submitted' and submitted_at) or
+                    (grade is not None and grade != '') or
+                    (score is not None)):
                     assignment_id = str(getattr(submission, 'assignment_id', ''))
                     if assignment_id:
                         submitted_assignment_ids.add(assignment_id)
