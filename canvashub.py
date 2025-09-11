@@ -96,13 +96,13 @@ class CanvasHub(DataUpdateCoordinator):
                 workflow_state = getattr(submission, 'workflow_state', None)
                 submitted_at = getattr(submission, 'submitted_at', None)
 
-                # Consider assignment submitted if it has been submitted (not just drafted)
-                if workflow_state == 'submitted' and submitted_at:
+                # Consider assignment submitted if it has been submitted (not just drafted) or graded
+                if workflow_state in ['submitted', 'graded'] and submitted_at:
                     assignment_id = str(getattr(submission, 'assignment_id', ''))
                     if assignment_id:
                         submitted_assignment_ids.add(assignment_id)
 
-        # Filter out submitted assignments
+        # Filter out completed assignments
         pending_assignments = []
         for assignment in assignments:
             assignment_id = str(getattr(assignment, 'id', ''))
