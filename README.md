@@ -50,7 +50,7 @@ Restart Home Assistant.
 
 ### Step 4: Add the Dashboard Card
 
-The card is automatically registered when the integration loads. To add it to your dashboard:
+The card is automatically registered when the integration loads. After configuring the integration, hard refresh your browser (Ctrl+Shift+R / Cmd+Shift+R), then:
 
 1. Edit your dashboard
 2. Click **+ Add Card**
