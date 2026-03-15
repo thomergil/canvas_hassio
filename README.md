@@ -50,11 +50,12 @@ Restart Home Assistant.
 
 ### Step 4: Add the Dashboard Card
 
-The card is automatically registered when the integration loads. Just add it to your dashboard:
+The card is automatically registered when the integration loads. To add it to your dashboard:
 
 1. Edit your dashboard
-2. Click **+ Add Card → Manual**
-3. Paste:
+2. Click **+ Add Card**
+3. Search for **"Canvas"** — select **Canvas - Homework Card**
+4. Configure the options in the UI, or switch to YAML and paste:
 
 ```yaml
 type: custom:canvas-homework
