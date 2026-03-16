@@ -1,92 +1,63 @@
-"""JavaScript module registration."""
-
+"""Frontend registration for canvas integration."""
 import logging
 from pathlib import Path
-from typing import Any
 
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_call_later
 
-from ..const import JSMODULES, URL_BASE
+from ..const import DOMAIN, INTEGRATION_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
+CARD_JS = "custom-canvas-homework-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_JS}"
 
-class JSModuleRegistration:
-    """Registers JavaScript modules in Home Assistant."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the registrar."""
-        self.hass = hass
-        self.lovelace = self.hass.data.get("lovelace")
+async def async_setup_view(hass: HomeAssistant) -> None:
+    """Register the Canvas card frontend resources."""
 
-    async def async_register(self) -> None:
-        """Register frontend resources."""
-        await self._async_register_path()
-        if getattr(self.lovelace, "mode",
-                   getattr(self.lovelace, "resource_mode", "yaml")) == "storage":
-            await self._async_wait_for_lovelace_resources()
-
-    async def _async_register_path(self) -> None:
-        """Register the static HTTP path."""
-        try:
-            await self.hass.http.async_register_static_paths(
-                [StaticPathConfig(URL_BASE, str(Path(__file__).parent), False)]
+    # Serve the card JS file
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                CARD_URL,
+                hass.config.path(f"custom_components/{DOMAIN}/frontend/{CARD_JS}"),
+                True,
             )
-        except RuntimeError:
-            _LOGGER.debug("Path already registered: %s", URL_BASE)
-
-    async def _async_wait_for_lovelace_resources(self) -> None:
-        """Wait for Lovelace resources to load."""
-
-        async def _check_loaded(_now: Any) -> None:
-            if self.lovelace.resources.loaded:
-                await self._async_register_modules()
-            else:
-                async_call_later(self.hass, 5, _check_loaded)
-
-        await _check_loaded(0)
-
-    async def _async_register_modules(self) -> None:
-        """Register or update JavaScript modules."""
-        existing_resources = [
-            r for r in self.lovelace.resources.async_items()
-            if r["url"].startswith(URL_BASE)
         ]
+    )
+    add_extra_js_url(hass, CARD_URL + "?" + INTEGRATION_VERSION)
 
-        for module in JSMODULES:
-            url = f"{URL_BASE}/{module['filename']}"
-            registered = False
+    # Also register as a lovelace resource so it shows in the card picker
+    resources = hass.data["lovelace"].resources
+    resource_url = CARD_URL + "?automatically-added&" + INTEGRATION_VERSION
+    if resources:
+        if not resources.loaded:
+            await resources.async_load()
+            resources.loaded = True
 
-            for resource in existing_resources:
-                if self._get_path(resource["url"]) == url:
-                    registered = True
-                    if self._get_version(resource["url"]) != module["version"]:
-                        await self.lovelace.resources.async_update_item(
-                            resource["id"],
+        frontend_added = False
+        for r in resources.async_items():
+            if r["url"].startswith(CARD_URL):
+                frontend_added = True
+                if not r["url"].endswith(INTEGRATION_VERSION):
+                    if isinstance(resources, ResourceStorageCollection):
+                        await resources.async_update_item(
+                            r["id"],
                             {
                                 "res_type": "module",
-                                "url": f"{url}?v={module['version']}",
+                                "url": resource_url,
                             },
                         )
-                    break
+                break
 
-            if not registered:
-                await self.lovelace.resources.async_create_item(
+        if not frontend_added:
+            if getattr(resources, "async_create_item", None):
+                await resources.async_create_item(
                     {
                         "res_type": "module",
-                        "url": f"{url}?v={module['version']}",
+                        "url": resource_url,
                     }
                 )
-
-    def _get_path(self, url: str) -> str:
-        """Extract path without parameters."""
-        return url.split("?")[0]
-
-    def _get_version(self, url: str) -> str:
-        """Extract version from URL."""
-        parts = url.split("?")
-        if len(parts) > 1 and parts[1].startswith("v="):
-            return parts[1].replace("v=", "")
-        return "0"
