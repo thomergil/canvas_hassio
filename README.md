@@ -24,21 +24,10 @@ Based on [schwartzpub's original integration](https://github.com/schwartzpub/can
 
 ### Step 2: Install the Integration
 
-#### Option A: HACS (recommended)
-
 1. In HACS, click the three dots menu → **Custom repositories**
 2. Add `https://github.com/thomergil/canvas_hassio` as type **Integration**
 3. Find "Canvas" in HACS and click **Install**
 4. Restart Home Assistant (in the terminal: `ha core restart`)
-
-#### Option B: Manual
-
-```bash
-cd /config/custom_components/
-git clone https://github.com/thomergil/canvas_hassio.git canvas
-```
-
-Restart Home Assistant (in the terminal: `ha core restart`).
 
 ### Step 3: Configure
 
@@ -139,15 +128,7 @@ action:
 
 ## Updating
 
-#### HACS
 Update through the HACS UI, then restart Home Assistant (`ha core restart`).
-
-#### Manual
-```bash
-cd /config/custom_components/canvas && git pull
-```
-
-Restart Home Assistant (`ha core restart`).
 
 ## Troubleshooting
 
