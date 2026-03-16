@@ -29,7 +29,7 @@ Based on [schwartzpub's original integration](https://github.com/schwartzpub/can
 1. In HACS, click the three dots menu → **Custom repositories**
 2. Add `https://github.com/thomergil/canvas_hassio` as type **Integration**
 3. Find "Canvas" in HACS and click **Install**
-4. Restart Home Assistant
+4. Restart Home Assistant (in the terminal: `ha core restart`)
 
 #### Option B: Manual
 
@@ -38,7 +38,7 @@ cd /config/custom_components/
 git clone https://github.com/thomergil/canvas_hassio.git canvas
 ```
 
-Restart Home Assistant.
+Restart Home Assistant (in the terminal: `ha core restart`).
 
 ### Step 3: Configure
 
@@ -140,19 +140,19 @@ action:
 ## Updating
 
 #### HACS
-Update through the HACS UI.
+Update through the HACS UI, then restart Home Assistant (`ha core restart`).
 
 #### Manual
 ```bash
 cd /config/custom_components/canvas && git pull
 ```
 
-Restart Home Assistant after updating.
+Restart Home Assistant (`ha core restart`).
 
 ## Troubleshooting
 
 **Sensors show "unavailable":** Check your API token hasn't expired. Go to Canvas → Account → Settings → Approved Integrations.
 
-**Card not showing:** Try a hard refresh in your browser (Ctrl+Shift+R / Cmd+Shift+R). If that doesn't work, restart Home Assistant.
+**Card not showing:** Try a hard refresh in your browser (Ctrl+Shift+R / Cmd+Shift+R). If that doesn't work, restart Home Assistant (`ha core restart`).
 
 **Duplicate notifications after restart:** The integration uses persistent storage in `/config/.storage/canvas.canvas_homework_state`. Delete this file only if you want a fresh start (all current assignments will appear as "new").
