@@ -1,4 +1,5 @@
-"""Frontend registration for canvas integration."""
+"""JavaScript module registration."""
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -16,13 +17,15 @@ class JSModuleRegistration:
     """Registers JavaScript modules in Home Assistant."""
 
     def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the registrar."""
         self.hass = hass
         self.lovelace = self.hass.data.get("lovelace")
 
     async def async_register(self) -> None:
         """Register frontend resources."""
         await self._async_register_path()
-        if self.lovelace.mode == "storage":
+        if getattr(self.lovelace, "mode",
+                   getattr(self.lovelace, "resource_mode", "yaml")) == "storage":
             await self._async_wait_for_lovelace_resources()
 
     async def _async_register_path(self) -> None:
@@ -31,12 +34,12 @@ class JSModuleRegistration:
             await self.hass.http.async_register_static_paths(
                 [StaticPathConfig(URL_BASE, str(Path(__file__).parent), False)]
             )
-            _LOGGER.debug("Path registered: %s", URL_BASE)
         except RuntimeError:
             _LOGGER.debug("Path already registered: %s", URL_BASE)
 
     async def _async_wait_for_lovelace_resources(self) -> None:
         """Wait for Lovelace resources to load."""
+
         async def _check_loaded(_now: Any) -> None:
             if self.lovelace.resources.loaded:
                 await self._async_register_modules()
@@ -78,8 +81,12 @@ class JSModuleRegistration:
                 )
 
     def _get_path(self, url: str) -> str:
+        """Extract path without parameters."""
         return url.split("?")[0]
 
     def _get_version(self, url: str) -> str:
+        """Extract version from URL."""
         parts = url.split("?")
-        return parts[1].replace("v=", "") if len(parts) > 1 else "0"
+        if len(parts) > 1 and parts[1].startswith("v="):
+            return parts[1].replace("v=", "")
+        return "0"

@@ -13,8 +13,8 @@ from .frontend import JSModuleRegistration
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Register frontend resources."""
+async def async_register_frontend(hass: HomeAssistant) -> None:
+    """Register frontend modules after HA startup."""
     module_register = JSModuleRegistration(hass)
     await module_register.async_register()
 
@@ -22,7 +22,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the canvas integration."""
     async def _setup_frontend(_event=None) -> None:
-        await _async_register_frontend(hass)
+        await async_register_frontend(hass)
 
     if hass.state == CoreState.running:
         await _setup_frontend()
