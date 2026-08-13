@@ -78,9 +78,15 @@ class CanvasHub(DataUpdateCoordinator):
             if observee is not None:
                 assignment_tasks.append(asyncio.create_task(self.get_assignments(observee.get("user_id", ""), course.id, self._semaphore)))
         assignment_results = await asyncio.gather(*assignment_tasks)
-        assignments.extend(
-            [Assignment(assignment) for assignment in itertools.chain.from_iterable(assignment_results)]
-        )
+
+        raw_assignments = itertools.chain.from_iterable(assignment_results)
+        for raw_dict in raw_assignments:
+            # Remove descriptions and jwt for tests
+            raw_dict.pop('description', None)
+            raw_dict.pop('secure_params', None)
+
+            # Append the smaller object
+            assignments.append(Assignment(raw_dict))
         return assignments
 
     async def poll_pending_assignments(self) -> list[dict]:
